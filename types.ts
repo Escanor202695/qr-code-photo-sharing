@@ -6,6 +6,7 @@ export interface MediaItem {
   timestamp: number;
   caption?: string;
   aiDescription?: string;
+  uploaderName?: string;
 }
 
 export interface EventData {
@@ -15,6 +16,8 @@ export interface EventData {
   hostName: string;
   coverImage?: string;
   welcomeMessage?: string;
+  isActive?: boolean;
+  createdAt?: number;
 }
 
 export enum ViewState {

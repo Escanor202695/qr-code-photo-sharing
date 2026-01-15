@@ -4,26 +4,40 @@ import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
 import EventAdmin from './components/EventAdmin';
 import PublicUpload from './components/PublicUpload';
-
-// Mock initial data
-const INITIAL_EVENTS: EventData[] = [
-  {
-    id: 'demo-wedding',
-    name: 'Sarah & Tom\'s Wedding',
-    date: '2023-10-24',
-    hostName: 'Sarah',
-    welcomeMessage: 'Welcome to our special day! Please snap and share every moment.'
-  }
-];
+import {
+  initializeStorage,
+  getEvents,
+  createEvent,
+  updateEvent,
+  getMedia,
+  addMedia,
+  updateMedia,
+  getMediaByEventId,
+} from './services/storageService';
 
 const App: React.FC = () => {
+  // Initialize storage on mount
+  useEffect(() => {
+    initializeStorage();
+  }, []);
+
   // Simple routing state
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.LANDING);
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
   
-  // Data state
-  const [events, setEvents] = useState<EventData[]>(INITIAL_EVENTS);
+  // Data state - now synced with localStorage
+  const [events, setEvents] = useState<EventData[]>([]);
   const [media, setMedia] = useState<MediaItem[]>([]);
+
+  // Load data from localStorage
+  const refreshData = () => {
+    setEvents(getEvents());
+    setMedia(getMedia());
+  };
+
+  useEffect(() => {
+    refreshData();
+  }, []);
 
   // Hash router simulation
   useEffect(() => {
@@ -34,10 +48,12 @@ const App: React.FC = () => {
         setActiveEventId(id);
         setCurrentView(ViewState.PUBLIC_UPLOAD);
       } else if (hash === '#/dashboard') {
+        refreshData(); // Refresh on dashboard visit
         setCurrentView(ViewState.DASHBOARD);
       } else if (hash.startsWith('#/admin/')) {
         const id = hash.split('/admin/')[1];
         setActiveEventId(id);
+        refreshData(); // Refresh on admin visit
         setCurrentView(ViewState.EVENT_ADMIN);
       } else {
         setCurrentView(ViewState.LANDING);
@@ -55,16 +71,24 @@ const App: React.FC = () => {
   };
 
   const handleCreateEvent = (newEvent: EventData) => {
-    setEvents([...events, newEvent]);
+    createEvent(newEvent);
+    refreshData();
     navigateTo(`/admin/${newEvent.id}`);
   };
 
   const handleAddMedia = (newMedia: MediaItem) => {
-    setMedia((prev) => [newMedia, ...prev]);
+    addMedia(newMedia);
+    refreshData();
   };
 
   const handleUpdateEvent = (updatedEvent: EventData) => {
-    setEvents(events.map(e => e.id === updatedEvent.id ? updatedEvent : e));
+    updateEvent(updatedEvent);
+    refreshData();
+  };
+
+  const handleUpdateMedia = (updatedMedia: MediaItem) => {
+    updateMedia(updatedMedia);
+    refreshData();
   };
 
   const renderView = () => {
@@ -83,19 +107,55 @@ const App: React.FC = () => {
       
       case ViewState.EVENT_ADMIN:
         const adminEvent = events.find(e => e.id === activeEventId);
-        if (!adminEvent) return <div>Event not found</div>;
+        if (!adminEvent) {
+          return (
+            <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+              <div className="text-center">
+                <div className="text-6xl text-slate-300 mb-4">🔍</div>
+                <h2 className="text-2xl font-bold text-slate-800 mb-2">Event Not Found</h2>
+                <p className="text-slate-500 mb-6">This event may have been deleted or doesn't exist.</p>
+                <button 
+                  onClick={() => navigateTo('/dashboard')}
+                  className="px-6 py-3 bg-fuchsia-600 text-white rounded-lg font-medium hover:bg-fuchsia-500"
+                >
+                  Go to Dashboard
+                </button>
+              </div>
+            </div>
+          );
+        }
         return (
           <EventAdmin 
             event={adminEvent} 
-            media={media.filter(m => m.eventId === adminEvent.id)}
+            media={getMediaByEventId(adminEvent.id)}
             onBack={() => navigateTo('/dashboard')}
             onUpdateEvent={handleUpdateEvent}
+            onUpdateMedia={handleUpdateMedia}
           />
         );
       
       case ViewState.PUBLIC_UPLOAD:
         const publicEvent = events.find(e => e.id === activeEventId);
-        if (!publicEvent) return <div className="p-8 text-center">Event not found. Please check the link.</div>;
+        if (!publicEvent) {
+          return (
+            <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl p-8 text-center max-w-md">
+                <div className="text-6xl mb-4">📷</div>
+                <h2 className="text-2xl font-bold text-slate-800 mb-2">Event Not Found</h2>
+                <p className="text-slate-500 mb-6">
+                  This event link may have expired or the event doesn't exist. 
+                  Please check with the event host for the correct link.
+                </p>
+                <button 
+                  onClick={() => navigateTo('/')}
+                  className="text-fuchsia-600 font-medium hover:underline"
+                >
+                  Go to Homepage
+                </button>
+              </div>
+            </div>
+          );
+        }
         return (
           <PublicUpload 
             event={publicEvent} 
