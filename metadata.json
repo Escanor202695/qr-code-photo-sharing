@@ -1,0 +1,7 @@
+{
+  "name": "Moments - Event Media Collector",
+  "description": "A seamless platform for collecting event photos and videos via QR code with AI-powered insights.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
