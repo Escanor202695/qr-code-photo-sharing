@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { EventData, MediaItem } from '../types';
-import { fileToBase64 } from '../services/storageService';
+import { fileToBase64, getMediaByEventId } from '../services/storageService';
 
 interface PublicUploadProps {
   event: EventData;
@@ -13,9 +13,12 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [success, setSuccess] = useState(false);
-  const [uploadedCount, setUploadedCount] = useState(0);
+  const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Get existing photos for this event
+  const existingPhotos = getMediaByEventId(event.id);
 
   const handleFileChange = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -25,6 +28,7 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
     
     const totalFiles = files.length;
     let completed = 0;
+    const newPhotos: string[] = [];
 
     for (const file of Array.from(files)) {
       try {
@@ -42,6 +46,7 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
         };
         
         onUpload(newMedia);
+        newPhotos.push(base64Url);
         completed++;
         setUploadProgress(Math.round((completed / totalFiles) * 100));
         
@@ -53,8 +58,8 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
     }
 
     setUploading(false);
+    setUploadedPhotos(newPhotos);
     setSuccess(true);
-    setUploadedCount(completed);
     
     // Clear input
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -81,7 +86,7 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
 
   const resetUpload = () => {
     setSuccess(false);
-    setUploadedCount(0);
+    setUploadedPhotos([]);
     setUploadProgress(0);
   };
 
@@ -118,28 +123,74 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
             </div>
 
             {success ? (
-              /* Success State */
-              <div className="text-center animate-in fade-in zoom-in">
+              /* Success State - NOW SHOWS UPLOADED PHOTOS */
+              <div className="text-center">
                 <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
                   <i className="fa-solid fa-check text-3xl text-green-600"></i>
                 </div>
                 <h3 className="text-2xl font-bold text-slate-800 mb-2">Upload Successful!</h3>
                 <p className="text-slate-500 mb-6">
-                  {uploadedCount} {uploadedCount === 1 ? 'photo' : 'photos'} shared successfully.
-                  <br />
-                  <span className="text-sm">Thank you for sharing your memories! 📸</span>
+                  {uploadedPhotos.length} {uploadedPhotos.length === 1 ? 'photo' : 'photos'} shared successfully.
                 </p>
-                <button 
-                  onClick={resetUpload}
-                  className="px-8 py-3 bg-gradient-to-r from-fuchsia-500 to-purple-600 text-white rounded-full font-semibold hover:shadow-lg transition-all"
-                >
-                  <i className="fa-solid fa-plus mr-2"></i>
-                  Upload More Photos
-                </button>
+                
+                {/* Show uploaded photos preview */}
+                {uploadedPhotos.length > 0 && (
+                  <div className="mb-6">
+                    <p className="text-sm text-slate-500 mb-3">Your uploads:</p>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {uploadedPhotos.slice(0, 4).map((photo, index) => (
+                        <div key={index} className="w-16 h-16 rounded-lg overflow-hidden border-2 border-green-200">
+                          <img src={photo} alt={`Upload ${index + 1}`} className="w-full h-full object-cover" />
+                        </div>
+                      ))}
+                      {uploadedPhotos.length > 4 && (
+                        <div className="w-16 h-16 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 text-sm font-medium">
+                          +{uploadedPhotos.length - 4}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Show total photos in gallery */}
+                <div className="bg-fuchsia-50 rounded-xl p-4 mb-6">
+                  <p className="text-fuchsia-700 text-sm">
+                    <i className="fa-solid fa-images mr-2"></i>
+                    This event now has <strong>{existingPhotos.length + uploadedPhotos.length}</strong> photos!
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <button 
+                    onClick={resetUpload}
+                    className="px-8 py-3 bg-gradient-to-r from-fuchsia-500 to-purple-600 text-white rounded-full font-semibold hover:shadow-lg transition-all"
+                  >
+                    <i className="fa-solid fa-plus mr-2"></i>
+                    Upload More Photos
+                  </button>
+                  
+                  <button 
+                    onClick={() => window.location.hash = `/admin/${event.id}`}
+                    className="px-8 py-3 border-2 border-fuchsia-200 text-fuchsia-600 rounded-full font-semibold hover:bg-fuchsia-50 transition-all"
+                  >
+                    <i className="fa-solid fa-images mr-2"></i>
+                    View Gallery
+                  </button>
+                </div>
               </div>
             ) : (
               /* Upload Form */
               <div className="space-y-6">
+                {/* Show existing photos count */}
+                {existingPhotos.length > 0 && (
+                  <div className="bg-slate-50 rounded-xl p-4 text-center">
+                    <p className="text-slate-600 text-sm">
+                      <i className="fa-solid fa-images mr-2 text-fuchsia-500"></i>
+                      <strong>{existingPhotos.length}</strong> photos already shared for this event
+                    </p>
+                  </div>
+                )}
+
                 {/* Optional Name */}
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
