@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { EventData, MediaItem } from '../types';
 import { fileToBase64, getMediaByEventId } from '../services/storageService';
+import { uploadToCloudinary, isCloudinaryConfigured } from '../services/cloudinaryService';
 
 interface PublicUploadProps {
   event: EventData;
@@ -12,57 +13,74 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
   const [uploaderName, setUploaderName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [success, setSuccess] = useState(false);
-  const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
+  const [currentFileIndex, setCurrentFileIndex] = useState(0);
+  const [totalFiles, setTotalFiles] = useState(0);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Get existing photos for this event
   const existingPhotos = getMediaByEventId(event.id);
+  const useCloudinary = isCloudinaryConfigured();
 
   const handleFileChange = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     
     setUploading(true);
     setUploadProgress(0);
+    setTotalFiles(files.length);
+    setCurrentFileIndex(0);
     
-    const totalFiles = files.length;
     let completed = 0;
-    const newPhotos: string[] = [];
 
     for (const file of Array.from(files)) {
       try {
-        // Convert to base64 for localStorage storage
-        const base64Url = await fileToBase64(file);
+        setCurrentFileIndex(completed + 1);
+        
+        let fileUrl: string;
         const type = file.type.startsWith('image/') ? 'image' : 'video';
+        
+        if (useCloudinary) {
+          // Upload to Cloudinary (fast, cloud storage)
+          const result = await uploadToCloudinary(file, (percent) => {
+            setUploadProgress(percent);
+          });
+          fileUrl = result.secure_url;
+        } else {
+          // Fallback to base64 localStorage (for demo without Cloudinary)
+          fileUrl = await fileToBase64(file);
+          // Simulate progress for base64
+          for (let i = 0; i <= 100; i += 20) {
+            setUploadProgress(i);
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+        }
         
         const newMedia: MediaItem = {
           id: `media-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           eventId: event.id,
-          url: base64Url,
+          url: fileUrl,
           type,
           timestamp: Date.now(),
           uploaderName: uploaderName || 'Anonymous Guest',
         };
         
         onUpload(newMedia);
-        newPhotos.push(base64Url);
         completed++;
-        setUploadProgress(Math.round((completed / totalFiles) * 100));
         
-        // Small delay between uploads
-        await new Promise(resolve => setTimeout(resolve, 300));
       } catch (error) {
         console.error('Upload error:', error);
       }
     }
 
     setUploading(false);
-    setUploadedPhotos(newPhotos);
-    setSuccess(true);
     
     // Clear input
     if (fileInputRef.current) fileInputRef.current.value = '';
+    
+    // ✅ AUTO-REDIRECT TO GALLERY after short delay
+    setTimeout(() => {
+      window.location.hash = `/admin/${event.id}`;
+    }, 500);
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -82,12 +100,6 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
     if (hasConsented && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       handleFileChange(e.dataTransfer.files);
     }
-  };
-
-  const resetUpload = () => {
-    setSuccess(false);
-    setUploadedPhotos([]);
-    setUploadProgress(0);
   };
 
   return (
@@ -122,61 +134,44 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
               <p className="text-slate-600 italic text-lg leading-relaxed">"{event.welcomeMessage}"</p>
             </div>
 
-            {success ? (
-              /* Success State - NOW SHOWS UPLOADED PHOTOS */
-              <div className="text-center">
-                <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                  <i className="fa-solid fa-check text-3xl text-green-600"></i>
+            {uploading ? (
+              /* Uploading State - Full screen loading */
+              <div className="py-10 text-center">
+                <div className="w-24 h-24 mx-auto mb-6 relative">
+                  <svg className="animate-spin" viewBox="0 0 100 100">
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="40"
+                      fill="none"
+                      stroke="#e9d5ff"
+                      strokeWidth="8"
+                    />
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="40"
+                      fill="none"
+                      stroke="#a855f7"
+                      strokeWidth="8"
+                      strokeDasharray={`${uploadProgress * 2.51} 251`}
+                      strokeLinecap="round"
+                      transform="rotate(-90 50 50)"
+                    />
+                  </svg>
+                  <span className="absolute inset-0 flex items-center justify-center text-lg font-bold text-fuchsia-600">
+                    {uploadProgress}%
+                  </span>
                 </div>
-                <h3 className="text-2xl font-bold text-slate-800 mb-2">Upload Successful!</h3>
-                <p className="text-slate-500 mb-6">
-                  {uploadedPhotos.length} {uploadedPhotos.length === 1 ? 'photo' : 'photos'} shared successfully.
+                <h3 className="text-xl font-bold text-slate-800 mb-2">
+                  Uploading{totalFiles > 1 ? ` (${currentFileIndex}/${totalFiles})` : '...'}
+                </h3>
+                <p className="text-slate-500">
+                  {useCloudinary ? 'Saving to cloud...' : 'Processing your photo...'}
                 </p>
-                
-                {/* Show uploaded photos preview */}
-                {uploadedPhotos.length > 0 && (
-                  <div className="mb-6">
-                    <p className="text-sm text-slate-500 mb-3">Your uploads:</p>
-                    <div className="flex flex-wrap justify-center gap-2">
-                      {uploadedPhotos.slice(0, 4).map((photo, index) => (
-                        <div key={index} className="w-16 h-16 rounded-lg overflow-hidden border-2 border-green-200">
-                          <img src={photo} alt={`Upload ${index + 1}`} className="w-full h-full object-cover" />
-                        </div>
-                      ))}
-                      {uploadedPhotos.length > 4 && (
-                        <div className="w-16 h-16 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 text-sm font-medium">
-                          +{uploadedPhotos.length - 4}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Show total photos in gallery */}
-                <div className="bg-fuchsia-50 rounded-xl p-4 mb-6">
-                  <p className="text-fuchsia-700 text-sm">
-                    <i className="fa-solid fa-images mr-2"></i>
-                    This event now has <strong>{existingPhotos.length + uploadedPhotos.length}</strong> photos!
-                  </p>
-                </div>
-
-                <div className="flex flex-col gap-3">
-                  <button 
-                    onClick={resetUpload}
-                    className="px-8 py-3 bg-gradient-to-r from-fuchsia-500 to-purple-600 text-white rounded-full font-semibold hover:shadow-lg transition-all"
-                  >
-                    <i className="fa-solid fa-plus mr-2"></i>
-                    Upload More Photos
-                  </button>
-                  
-                  <button 
-                    onClick={() => window.location.hash = `/admin/${event.id}`}
-                    className="px-8 py-3 border-2 border-fuchsia-200 text-fuchsia-600 rounded-full font-semibold hover:bg-fuchsia-50 transition-all"
-                  >
-                    <i className="fa-solid fa-images mr-2"></i>
-                    View Gallery
-                  </button>
-                </div>
+                <p className="text-xs text-slate-400 mt-4">
+                  You'll be redirected to the gallery automatically
+                </p>
               </div>
             ) : (
               /* Upload Form */
@@ -190,6 +185,16 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
                     </p>
                   </div>
                 )}
+
+                {/* Storage indicator */}
+                <div className={`text-center text-xs py-2 px-4 rounded-full inline-flex items-center gap-2 mx-auto ${
+                  useCloudinary 
+                    ? 'bg-green-50 text-green-700' 
+                    : 'bg-amber-50 text-amber-700'
+                }`}>
+                  <i className={`fa-solid ${useCloudinary ? 'fa-cloud' : 'fa-database'}`}></i>
+                  {useCloudinary ? 'Cloud storage enabled' : 'Demo mode (local storage)'}
+                </div>
 
                 {/* Optional Name */}
                 <div>
@@ -237,65 +242,31 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed z-20"
                   />
                   
-                  {uploading ? (
-                    /* Uploading State */
-                    <div className="py-10 text-center bg-fuchsia-50 rounded-2xl border-2 border-fuchsia-200">
-                      <div className="w-16 h-16 mx-auto mb-4 relative">
-                        <svg className="animate-spin" viewBox="0 0 100 100">
-                          <circle
-                            cx="50"
-                            cy="50"
-                            r="40"
-                            fill="none"
-                            stroke="#e9d5ff"
-                            strokeWidth="10"
-                          />
-                          <circle
-                            cx="50"
-                            cy="50"
-                            r="40"
-                            fill="none"
-                            stroke="#a855f7"
-                            strokeWidth="10"
-                            strokeDasharray={`${uploadProgress * 2.51} 251`}
-                            strokeLinecap="round"
-                            transform="rotate(-90 50 50)"
-                          />
-                        </svg>
-                        <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-fuchsia-600">
-                          {uploadProgress}%
-                        </span>
-                      </div>
-                      <p className="text-fuchsia-700 font-medium">Uploading your memories...</p>
-                    </div>
-                  ) : (
-                    /* Ready to Upload */
-                    <div className={`py-10 text-center rounded-2xl border-2 border-dashed transition-all ${
-                      dragActive 
-                        ? 'border-fuchsia-500 bg-fuchsia-50' 
-                        : hasConsented 
-                          ? 'border-slate-200 hover:border-fuchsia-400 hover:bg-fuchsia-50/50' 
-                          : 'border-slate-200 bg-slate-50'
+                  <div className={`py-10 text-center rounded-2xl border-2 border-dashed transition-all ${
+                    dragActive 
+                      ? 'border-fuchsia-500 bg-fuchsia-50' 
+                      : hasConsented 
+                        ? 'border-slate-200 hover:border-fuchsia-400 hover:bg-fuchsia-50/50' 
+                        : 'border-slate-200 bg-slate-50'
+                  }`}>
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 transition-colors ${
+                      hasConsented 
+                        ? 'bg-fuchsia-100 text-fuchsia-600 group-hover:bg-fuchsia-200' 
+                        : 'bg-slate-200 text-slate-400'
                     }`}>
-                      <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 transition-colors ${
-                        hasConsented 
-                          ? 'bg-fuchsia-100 text-fuchsia-600 group-hover:bg-fuchsia-200' 
-                          : 'bg-slate-200 text-slate-400'
-                      }`}>
-                        <i className="fa-solid fa-cloud-arrow-up text-2xl"></i>
-                      </div>
-                      <p className={`font-semibold mb-1 ${hasConsented ? 'text-slate-800' : 'text-slate-400'}`}>
-                        {hasConsented ? 'Tap to select or drag files here' : 'Accept terms to upload'}
-                      </p>
-                      <p className="text-sm text-slate-400">
-                        JPG, PNG, MP4 • Multiple files supported
-                      </p>
+                      <i className="fa-solid fa-cloud-arrow-up text-2xl"></i>
                     </div>
-                  )}
+                    <p className={`font-semibold mb-1 ${hasConsented ? 'text-slate-800' : 'text-slate-400'}`}>
+                      {hasConsented ? 'Tap to select or drag files here' : 'Accept terms to upload'}
+                    </p>
+                    <p className="text-sm text-slate-400">
+                      JPG, PNG, MP4 • Multiple files supported
+                    </p>
+                  </div>
                 </div>
 
                 {/* Camera Quick Access */}
-                {hasConsented && !uploading && (
+                {hasConsented && (
                   <div className="grid grid-cols-2 gap-3">
                     <label className="flex items-center justify-center gap-2 py-3 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer transition-colors text-slate-700 font-medium">
                       <i className="fa-solid fa-camera"></i>
