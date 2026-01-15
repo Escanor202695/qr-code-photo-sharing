@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { EventData, MediaItem } from '../types';
+import { uploadToCloudinary, isCloudinaryConfigured } from '../services/cloudinaryService';
+import { fileToBase64 } from '../services/storageService';
 
 interface EventAdminProps {
   event: EventData;
@@ -7,14 +9,75 @@ interface EventAdminProps {
   onBack: () => void;
   onUpdateEvent: (event: EventData) => void;
   onUpdateMedia: (media: MediaItem) => void;
+  onAddMedia?: (media: MediaItem) => void;
 }
 
-const EventAdmin: React.FC<EventAdminProps> = ({ event, media, onBack, onUpdateEvent, onUpdateMedia }) => {
+const EventAdmin: React.FC<EventAdminProps> = ({ event, media, onBack, onUpdateEvent, onUpdateMedia, onAddMedia }) => {
+  // Check if we should open gallery tab (coming from upload)
+  const shouldOpenGallery = sessionStorage.getItem('openGalleryTab') === 'true';
+  
   const [activeTab, setActiveTab] = useState<'gallery' | 'settings' | 'share'>('share');
   const [selectedImage, setSelectedImage] = useState<MediaItem | null>(null);
   const [slideshowActive, setSlideshowActive] = useState(false);
   const [slideshowIndex, setSlideshowIndex] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const useCloudinary = isCloudinaryConfigured();
+  
+  // Effect to switch to gallery tab if coming from upload
+  React.useEffect(() => {
+    if (shouldOpenGallery) {
+      setActiveTab('gallery');
+      sessionStorage.removeItem('openGalleryTab');
+    }
+  }, [shouldOpenGallery]);
+
+  // Handle file upload from admin
+  const handleAdminUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0 || !onAddMedia) return;
+    
+    setUploading(true);
+    setUploadProgress(0);
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        let fileUrl: string;
+        const type = file.type.startsWith('image/') ? 'image' : 'video';
+        
+        if (useCloudinary) {
+          const result = await uploadToCloudinary(file, (percent) => {
+            setUploadProgress(percent);
+          });
+          fileUrl = result.secure_url;
+        } else {
+          fileUrl = await fileToBase64(file);
+        }
+        
+        const newMedia: MediaItem = {
+          id: `media-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          eventId: event.id,
+          url: fileUrl,
+          type,
+          timestamp: Date.now(),
+          uploaderName: 'Host',
+        };
+        
+        onAddMedia(newMedia);
+        setUploadProgress(Math.round(((i + 1) / files.length) * 100));
+      } catch (error) {
+        console.error('Upload error:', error);
+      }
+    }
+    
+    setUploading(false);
+    setShowUploadModal(false);
+    setActiveTab('gallery');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   const eventLink = `${window.location.origin}${window.location.pathname}#/event/${event.id}`;
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(eventLink)}&color=a855f7&bgcolor=ffffff`;
@@ -92,6 +155,15 @@ const EventAdmin: React.FC<EventAdminProps> = ({ event, media, onBack, onUpdateE
           </button>
           <h1 className="text-lg font-bold text-slate-800 hidden md:block">{event.name}</h1>
           <div className="flex gap-2">
+            {/* Upload Button */}
+            <button 
+              onClick={() => setShowUploadModal(true)}
+              className="bg-fuchsia-600 text-white px-4 py-2 rounded-lg hover:bg-fuchsia-500 transition-colors flex items-center gap-2"
+              title="Upload Photos"
+            >
+              <i className="fa-solid fa-cloud-arrow-up"></i>
+              <span className="hidden sm:inline">Upload</span>
+            </button>
             {media.length > 0 && (
               <>
                 <button 
@@ -387,7 +459,7 @@ const EventAdmin: React.FC<EventAdminProps> = ({ event, media, onBack, onUpdateE
                   className="max-h-[70vh] max-w-full object-contain" 
                 />
               ) : (
-                <video src={selectedImage.url} controls className="max-h-[70vh] max-w-full" autoPlay />
+                <video src={selectedImage.url} controls className="max-h-[70vh] max-w-full" />
               )}
             </div>
             
@@ -471,8 +543,9 @@ const EventAdmin: React.FC<EventAdminProps> = ({ event, media, onBack, onUpdateE
               <video 
                 src={media[slideshowIndex].url} 
                 className="max-h-[85vh] max-w-full mx-auto"
-                autoPlay
+                controls
                 muted
+                key={slideshowIndex}
               />
             )}
           </div>
@@ -491,6 +564,75 @@ const EventAdmin: React.FC<EventAdminProps> = ({ event, media, onBack, onUpdateE
               className="h-full bg-fuchsia-500 transition-all duration-300"
               style={{ width: `${((slideshowIndex + 1) / media.length) * 100}%` }}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Upload Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-gradient-to-r from-fuchsia-500 to-purple-600">
+              <h3 className="text-lg font-bold text-white">
+                <i className="fa-solid fa-cloud-arrow-up mr-2"></i>
+                Upload Photos
+              </h3>
+              <button 
+                onClick={() => setShowUploadModal(false)} 
+                className="text-white/80 hover:text-white"
+                disabled={uploading}
+              >
+                <i className="fa-solid fa-xmark text-xl"></i>
+              </button>
+            </div>
+            
+            <div className="p-6">
+              {uploading ? (
+                <div className="py-8 text-center">
+                  <div className="w-20 h-20 mx-auto mb-4 relative">
+                    <svg className="animate-spin" viewBox="0 0 100 100">
+                      <circle cx="50" cy="50" r="40" fill="none" stroke="#e9d5ff" strokeWidth="8" />
+                      <circle
+                        cx="50" cy="50" r="40" fill="none" stroke="#a855f7" strokeWidth="8"
+                        strokeDasharray={`${uploadProgress * 2.51} 251`}
+                        strokeLinecap="round" transform="rotate(-90 50 50)"
+                      />
+                    </svg>
+                    <span className="absolute inset-0 flex items-center justify-center text-lg font-bold text-fuchsia-600">
+                      {uploadProgress}%
+                    </span>
+                  </div>
+                  <p className="text-slate-600">Uploading...</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="relative">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={(e) => handleAdminUpload(e.target.files)}
+                      accept="image/*,video/*"
+                      multiple
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                    />
+                    <div className="border-2 border-dashed border-slate-200 hover:border-fuchsia-400 rounded-xl p-10 text-center transition-colors">
+                      <div className="w-16 h-16 bg-fuchsia-100 text-fuchsia-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <i className="fa-solid fa-cloud-arrow-up text-2xl"></i>
+                      </div>
+                      <p className="text-slate-800 font-medium mb-1">Click or drag files here</p>
+                      <p className="text-sm text-slate-400">JPG, PNG, MP4 supported</p>
+                    </div>
+                  </div>
+                  
+                  <div className={`text-center text-xs py-2 px-4 rounded-full ${
+                    useCloudinary ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
+                  }`}>
+                    <i className={`fa-solid ${useCloudinary ? 'fa-cloud' : 'fa-database'} mr-1`}></i>
+                    {useCloudinary ? 'Uploading to Cloudinary' : 'Demo mode (local storage)'}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

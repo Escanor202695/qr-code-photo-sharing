@@ -21,6 +21,9 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
   // Get existing photos for this event
   const existingPhotos = getMediaByEventId(event.id);
   const useCloudinary = isCloudinaryConfigured();
+  
+  // Debug log
+  console.log('📸 Upload mode:', useCloudinary ? 'CLOUDINARY' : 'LOCAL STORAGE');
 
   const handleFileChange = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -41,10 +44,18 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
         
         if (useCloudinary) {
           // Upload to Cloudinary (fast, cloud storage)
-          const result = await uploadToCloudinary(file, (percent) => {
-            setUploadProgress(percent);
-          });
-          fileUrl = result.secure_url;
+          console.log('📤 Uploading to Cloudinary...');
+          try {
+            const result = await uploadToCloudinary(file, (percent) => {
+              setUploadProgress(percent);
+            });
+            fileUrl = result.secure_url;
+            console.log('✅ Got Cloudinary URL:', fileUrl);
+          } catch (cloudErr) {
+            console.error('❌ Cloudinary failed, falling back to localStorage:', cloudErr);
+            // Fallback to localStorage if Cloudinary fails
+            fileUrl = await fileToBase64(file);
+          }
         } else {
           // Fallback to base64 localStorage (for demo without Cloudinary)
           fileUrl = await fileToBase64(file);
@@ -78,9 +89,11 @@ const PublicUpload: React.FC<PublicUploadProps> = ({ event, onUpload }) => {
     if (fileInputRef.current) fileInputRef.current.value = '';
     
     // ✅ AUTO-REDIRECT TO GALLERY after short delay
+    // Store flag to open gallery tab
+    sessionStorage.setItem('openGalleryTab', 'true');
     setTimeout(() => {
       window.location.hash = `/admin/${event.id}`;
-    }, 500);
+    }, 800);
   };
 
   const handleDrag = (e: React.DragEvent) => {

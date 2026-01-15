@@ -54,6 +54,7 @@ export const uploadToCloudinary = async (
     xhr.onload = () => {
       if (xhr.status === 200) {
         const response = JSON.parse(xhr.responseText);
+        console.log('✅ Cloudinary upload success:', response.secure_url);
         resolve({
           secure_url: response.secure_url,
           public_id: response.public_id,
@@ -64,7 +65,8 @@ export const uploadToCloudinary = async (
           bytes: response.bytes,
         });
       } else {
-        reject(new Error(`Upload failed: ${xhr.statusText}`));
+        console.error('❌ Cloudinary upload failed:', xhr.status, xhr.responseText);
+        reject(new Error(`Upload failed: ${xhr.status} - ${xhr.responseText}`));
       }
     };
 

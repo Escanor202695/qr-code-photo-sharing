@@ -124,13 +124,16 @@ const App: React.FC = () => {
             </div>
           );
         }
+        // Use state media filtered by event ID for reactivity
+        const eventMedia = media.filter(m => m.eventId === adminEvent.id);
         return (
           <EventAdmin 
             event={adminEvent} 
-            media={getMediaByEventId(adminEvent.id)}
+            media={eventMedia}
             onBack={() => navigateTo('/dashboard')}
             onUpdateEvent={handleUpdateEvent}
             onUpdateMedia={handleUpdateMedia}
+            onAddMedia={handleAddMedia}
           />
         );
       
